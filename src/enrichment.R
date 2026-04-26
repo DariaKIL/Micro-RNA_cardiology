@@ -3,8 +3,7 @@
 convert_miRNA_versions <- function(res_sign_df,
                                    contrast_name = NULL,
                                    org = "hsa",
-                                   table = "validated",
-                                   min_miRNA_per_target = 2) {
+                                   table = "validated") {
   
   # Stop early if no significant miRNAs
   if (is.null(res_sign_df) || nrow(res_sign_df) == 0) {
@@ -49,27 +48,9 @@ convert_miRNA_versions <- function(res_sign_df,
   ))
 }
 
-
-#' Perform GO enrichment analysis
-
-perform_go_enrichment <- function(gene_list, OrgDb = org.Hs.eg.db, keyType = "SYMBOL", 
-                                  ont = "BP", pAdjustMethod = "BH", qvalueCutoff = 0.05) {
-  # Perform GO enrichment
-  GO_enrich <- enrichGO(
-    gene = gene_list,  
-    OrgDb = OrgDb,
-    keyType = keyType,
-    ont = ont, 
-    pAdjustMethod = pAdjustMethod,
-    qvalueCutoff = qvalueCutoff
-  )
-  
-  return(GO_enrich)
-}
-
 #' Perform KEGG enrichment analysis
 
-perform_kegg_enrichment <- function(gene_list, contrast_name = "", direction = "", species = "Homo sapiens") {
+perform_kegg_enrichment <- function(gene_list, contrast_name = "", direction = "") {
   if(length(gene_list) == 0) {
     message("Empty gene list, skipping KEGG enrichment.")
     return(NULL)
@@ -102,50 +83,120 @@ perform_kegg_enrichment <- function(gene_list, contrast_name = "", direction = "
   plt <- dotplot(kegg_enrich, showCategory = 20) +
     ggtitle(sprintf("KEGG enrichment: %s (%s)", contrast_name, direction)) +
     theme(plot.title = element_text(size = 14, face = "bold"),
-          axis.text.y = element_text(size = 11))
+          axis.text.y = element_text(size = 10))
+  
+  return(plt)
+}
+# Converting in table format with miRs
+targets_miR_table <- function(res_sign_df,
+                                   contrast_name = NULL,
+                                   org = "hsa",
+                                   table = "validated",
+                                   min_miRNA_per_target = 2) {
+  
+  # Stop early if no significant miRNAs
+  if (is.null(res_sign_df) || nrow(res_sign_df) == 0) {
+    message(sprintf("No significant miRNAs found in %s. Skipping.", contrast_name))
+    return(NULL)
+  }
+  
+  # Split up/down regulated miRNAs
+  up <- res_sign_df %>%
+    as.data.frame() %>%
+    dplyr::filter(log2FoldChange > 0)
+  
+  down <- res_sign_df %>%
+    as.data.frame() %>%
+    dplyr::filter(log2FoldChange < 0)
+  
+  if (nrow(up) == 0 && nrow(down) == 0) {
+    message(sprintf("No up- or down-regulated miRNAs found in %s.", contrast_name))
+    return(NULL)
+  }
+  
+  targets_up <- character(0)
+  targets_down <- character(0)
+  
+  if (nrow(up) > 0) {
+    mir_up <- rownames(up)
+    converted_up <- miRNAVersionConvert(mir_up)
+    targets_up <- get_multimir(org = org, mirna = converted_up, table = table)@data %>%
+      dplyr::distinct(mature_mirna_id, target_symbol) %>%
+      dplyr::group_by(target_symbol) %>%
+      dplyr::filter(n_distinct(mature_mirna_id) >= 2) %>%
+      dplyr::ungroup()
+  }
+  
+  if (nrow(down) > 0) {
+    mir_down <- rownames(down)
+    converted_down <- miRNAVersionConvert(mir_down)
+    targets_down <- get_multimir(org = org, mirna = converted_down, table = table)@data%>%
+      dplyr::distinct(mature_mirna_id, target_symbol) %>%
+      dplyr::group_by(target_symbol) %>%
+      dplyr::filter(n_distinct(mature_mirna_id) >= 2) %>%
+      dplyr::ungroup()
+  }
+  
+  return(list(
+    df_down = targets_up,
+    df_up = targets_down
+  ))
+}
+
+
+#' Perform GO enrichment analysis
+
+perform_go_enrichment <- function(gene_list,
+                                  contrast_name = "",
+                                  direction = "",
+                                  OrgDb = org.Hs.eg.db,
+                                  keyType = "SYMBOL",
+                                  ont = "BP",
+                                  pAdjustMethod = "BH",
+                                  qvalueCutoff = 0.05) {
+  
+  if (length(gene_list) == 0) {
+    message("Empty gene list, skipping GO enrichment.")
+    return(NULL)
+  }
+  
+  # если приходит data.frame
+  if (is.data.frame(gene_list)) {
+    gene_list <- gene_list$target_symbol
+  }
+  
+  # оставить только валидные гены
+  valid_genes <- gene_list[gene_list %in% keys(OrgDb, keytype = keyType)]
+  
+  if (length(valid_genes) == 0) {
+    message("No valid genes for GO enrichment. Skipping...")
+    return(NULL)
+  }
+  
+  GO_enrich <- enrichGO(
+    gene = valid_genes,
+    OrgDb = OrgDb,
+    keyType = keyType,
+    ont = ont,
+    pAdjustMethod = pAdjustMethod,
+    qvalueCutoff = qvalueCutoff
+  )
+  
+  if (is.null(GO_enrich) || nrow(GO_enrich@result) == 0) {
+    message("No enriched GO terms found.")
+    return(NULL)
+  }
+  
+  plt <- dotplot(GO_enrich, showCategory = 20) +
+    ggtitle(sprintf("GO enrichment (%s): %s", ont, direction)) +
+    theme(
+      plot.title = element_text(size = 14, face = "bold"),
+      axis.text.y = element_text(size = 10)
+    )
   
   return(plt)
 }
 
-#' Process mapped data
-
-process_mapped_data <- function(mapped_file = "data/mapped.csv") {
-  # Load mapped data
-  all_df <- read.csv(mapped_file, header = TRUE, sep = ",")
-  all_df <- all_df[, -c(1, 2)]
-  
-  # Convert empty strings to NA
-  cols <- c("exact.miRNA", "hairpin.miRNA", "mature.tRNA", "primary.tRNA", "snoRNA", "rRNA", "ncrna.others", "mRNA", "isomiR.miRNA")
-  all_df[cols] <- lapply(all_df[cols], function(x) ifelse(x == "", NA, x))
-  
-  # Create merged column
-  all_df$merged_col <- apply(all_df[, c("exact.miRNA", "hairpin.miRNA", "mature.tRNA", "primary.tRNA", "snoRNA", "rRNA", "ncrna.others", "mRNA", "isomiR.miRNA")], 1, function(x) na.omit(x)[1])
-  all_df <- all_df[, -c(1:9)]
-  
-  # Collapse data
-  collapsed_df <- all_df %>%
-    group_by(merged_col) %>%
-    summarise(across(everything(), sum, na.rm = FALSE)) %>%
-    as.data.frame()  
-  
-  # Set row names
-  rownames(collapsed_df) <- collapsed_df$merged_col
-  collapsed_df$merged_col <- NULL 
-  
-  # Process column names
-  colnames(collapsed_df) <- gsub("^X", "", colnames(collapsed_df))
-  rownames(collapsed_df) <- collapsed_df$X
-  collapsed_df$X <- NULL
-  
-  # Filter samples
-  common_samples <- intersect(colnames(collapsed_df), coldata$sample)
-  collapsed_df <- rownames_to_column(collapsed_df, var = "ncRNA")
-  collapsed_df <- collapsed_df[, c("ncRNA", common_samples)] 
-  rownames(collapsed_df) <- collapsed_df$ncRNA
-  collapsed_df$ncRNA <- NULL
-  
-  return(collapsed_df)
-}
 
 #' Create GO enrichment emapplot
 

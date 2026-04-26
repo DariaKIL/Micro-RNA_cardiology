@@ -52,6 +52,7 @@ load_and_process_data <- function() {
   
   # Remove leading X (R adds this to numeric column names)
   colnames(counts) <- gsub("^X", "", colnames(counts))
+  phenotable$sample <- gsub("\\.", "-", phenotable$sample)
   
   n_changed <- sum(original_names != colnames(counts))
   if (n_changed > 0) {
@@ -178,7 +179,7 @@ load_sample_annotation <- function(annotation_file = ANNOTATION_FILE,
   colnames(anno)[colnames(anno) == "Sample.name.s."] <- "sample"
   
   # Remove unnecessary columns
-  anno <- anno[, -c(2:5, 7, 15)]
+  anno <- anno[, -c(2:5, 7, 15)] #!!!!
   
   cat(sprintf("   ✓ Retained %d columns after filtering\n", ncol(anno)))
   

@@ -5,6 +5,7 @@ create_venn_diagram <- function(
     phenotable,
     condition_col = "condition",
     count_threshold = HIGH_EXPRESSION_THRESHOLD,
+    group_colors = GROUP_COLORS,
     output_file = NULL
 ) {
   
@@ -35,12 +36,13 @@ create_venn_diagram <- function(
   
   # Build list automatically
   venn_list <- split(long_df$feature, long_df[[condition_col]])
+  group_colors_use <- group_colors[names(venn_list)]
   
   # Plot
   plt <- ggvenn(
     venn_list,
     fill_alpha = 0.5,
-    fill_color = GROUP_COLORS,
+    fill_color = group_colors_use,
     stroke_size = 0,
     set_name_size = 5,
     text_size = 4
@@ -268,13 +270,13 @@ create_sample_distance_heatmap <- function(rlt, group_col = "condition", output_
                   clustering_distance_cols = "euclidean",
                   annotation_col = annotation_df,
                   annotation_row = annotation_df,
+                  #annotation_colors = NULL,
                   color = colors)
   
   # Save if requested
   if (!is.null(output_file)) {
     ggsave(output_file, plot = plt, width = 8, height = 6, dpi = 300, bg = "white")
   }
-  
   return(plt)
 }
 
@@ -454,4 +456,44 @@ create_go_enrichment_dotplot <- function(go_enrichment, title, output_file = NUL
   }
   
   return(p1)
+}
+
+#' Process mapped data
+
+process_mapped_data <- function(mapped_file = "data/mapped.csv") {
+  # Load mapped data
+  all_df <- read.csv(mapped_file, header = TRUE, sep = ",")
+  all_df <- all_df[, -c(1, 2)]
+  
+  # Convert empty strings to NA
+  cols <- c("exact.miRNA", "hairpin.miRNA", "mature.tRNA", "primary.tRNA", "snoRNA", "rRNA", "ncrna.others", "mRNA", "isomiR.miRNA")
+  all_df[cols] <- lapply(all_df[cols], function(x) ifelse(x == "", NA, x))
+  
+  # Create merged column
+  all_df$merged_col <- apply(all_df[, c("exact.miRNA", "hairpin.miRNA", "mature.tRNA", "primary.tRNA", "snoRNA", "rRNA", "ncrna.others", "mRNA", "isomiR.miRNA")], 1, function(x) na.omit(x)[1])
+  all_df <- all_df[, -c(1:9)]
+  
+  # Collapse data
+  collapsed_df <- all_df %>%
+    group_by(merged_col) %>%
+    summarise(across(everything(), sum, na.rm = FALSE)) %>%
+    as.data.frame()  
+  
+  # Set row names
+  rownames(collapsed_df) <- collapsed_df$merged_col
+  collapsed_df$merged_col <- NULL 
+  
+  # Process column names
+  colnames(collapsed_df) <- gsub("^X", "", colnames(collapsed_df))
+  rownames(collapsed_df) <- collapsed_df$X
+  collapsed_df$X <- NULL
+  
+  # Filter samples
+  common_samples <- intersect(colnames(collapsed_df), coldata$sample)
+  collapsed_df <- rownames_to_column(collapsed_df, var = "ncRNA")
+  collapsed_df <- collapsed_df[, c("ncRNA", common_samples)] 
+  rownames(collapsed_df) <- collapsed_df$ncRNA
+  collapsed_df$ncRNA <- NULL
+  
+  return(collapsed_df)
 }

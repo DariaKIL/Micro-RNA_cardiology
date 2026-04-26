@@ -1,0 +1,565 @@
+---
+title: "micro-RNA Vesicles"
+output:
+  html_notebook: default
+---
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+	echo = FALSE,
+	message = FALSE,
+	warning = FALSE
+)
+```
+
+
+## Импортируем данные
+```{r}
+setwd("~/GitHub/ncRNA_pipeline/Vesicles_CABG")
+source("~/GitHub/ncRNA_pipeline/config.R")
+source(here("Vesicles_CABG", "config_v.R"))
+source(here("src", "data_processing.R"))
+source(here("src", "visualization.R"))
+source(here("src", "calculations.R"))
+data <- load_and_process_data()
+counts <- data$counts
+phenotable <- data$phenotable
+summed_anno <- load_sample_annotation(phenotable = data$phenotable)
+```
+**Диаграмма Венна: микро РНК (>150 каунтов)**
+```{r}
+venn_plot <- create_venn_diagram(
+  counts = counts,
+  phenotable = phenotable
+)
+venn_plot$plot
+```
+**Уникальные микроРНК для каждой группы**
+```{r}
+get_unique_venn_elements(venn_plot$venn_list)
+```
+**Распределение количества ридов различных типов РНК по образцам**
+```{r}
+create_barplot_all_dataset(data = summed_anno)
+```
+**Распределение количества ридов различных типов РНК по группам в %**
+```{r}
+create_barplot_all_dataset_normalized(data = summed_anno)
+```
+```{r}
+grouped_barplots <- create_grouped_barplots(data = summed_anno, phenotable = phenotable, condition_col = "condition")
+grouped_barplots$counts
+grouped_barplots$proportion
+```
+```{r}
+phenotable$time <- relevel(factor(phenotable$time), ref = "before")
+phenotable$type <- as.character(phenotable$type)
+phenotable$patient <- as.character(phenotable$patient)
+modelMatrix <- model.matrix(~type*time + patient, data = phenotable)
+modelMatrix
+```
+```{r}
+dds <- DESeqDataSetFromMatrix(countData = counts, 
+                              colData = phenotable, 
+                              design = ~type*time + patient)
+dds$condition <- relevel(dds$time, ref = "before")
+dds
+```
+**Run Differential Expression Analysis for all dataset**
+
+```{r}
+dds <- DESeq(dds, fitType = "parametric")
+dds
+```
+
+```{r}
+plotDispEsts(dds)
+```
+
+```{r}
+reads_after <- colSums(counts(dds))
+total_after <- sum(counts(dds))
+reads_after
+total_after
+```
+**rlog трансформация**
+```{r}
+rlt_list <- auto_transform_dds(dds)
+rlt <- rlt_list$transformed
+rlt_list
+```
+
+**PCA plot**
+
+```{r}
+pcaData <- plotPCA(rlt, intgroup=c("time", "type", "patient"), returnData = TRUE)
+pcaData$patient <- factor(pcaData$patient)
+percentVar <- round(100 * attr(pcaData, "percentVar"))
+
+pcaData$condition_type <- paste(pcaData$time, pcaData$type, sep = "_")
+
+ggplot(pcaData, aes(PC1, PC2, shape = patient, color = condition_type)) +
+  geom_point(size = 3) +
+  xlab(paste0("PC1: ", percentVar[1], "%")) +
+  ylab(paste0("PC2: ", percentVar[2], "%")) + 
+  coord_fixed() +
+  theme_bw() +
+  ggtitle("PCA plot for all dataset before removing donor effect")+
+  scale_color_brewer(palette = "Set2")
+```
+```{r}
+assay(rlt) <- limma::removeBatchEffect(assay(rlt),
+                                       batch = colData(dds)[,'patient'])
+
+pcaData <- plotPCA(rlt, intgroup=c("time", "type", "patient"), returnData = TRUE)
+pcaData$patient <- factor(pcaData$patient)
+percentVar <- round(100 * attr(pcaData, "percentVar"))
+
+pcaData$condition_type <- paste(pcaData$time, pcaData$type, sep = "_")
+
+plt <- ggplot(pcaData, aes(PC1, PC2, shape = patient, color = condition_type)) +
+  geom_point(size = 3) +
+  xlab(paste0("PC1: ", percentVar[1], "%")) +
+  ylab(paste0("PC2: ", percentVar[2], "%")) + 
+  coord_fixed() +
+  theme_bw() +
+  ggtitle("PCA plot for all dataset afrter removing donor effect")+
+  scale_color_brewer(palette = "Set2")
+
+plt
+ggsave("./pictures/PCA plot for all dataset after removing donor effect.tiff", plot = plt, width = 8, height = 6, dpi = 300, bg = "white")
+```
+```{r}
+create_heatmap_most_expressed(rlt, top_n = 30, group_col = "condition", output_file = NULL)
+```
+
+
+**Plot of the distance between samples heatmap**
+Расчет расстояний между образцами
+	•	Обычно используется евклидово расстояние (по умолчанию в DESeq2).
+	•	Оно вычисляется по нормализованным данным экспрессии (rlog() или vst()).
+	•	Чем меньше расстояние — тем более похожи образцы.
+```{r}
+create_sample_distance_heatmap(rlt, group_col = "condition", output_file = NULL)
+```
+
+## Только везикулы типа 150
+```{r}
+coldata_150 <- phenotable[phenotable$type == 150, ]
+rownames(coldata_150) <- coldata_150$sample
+coldata_150$sample <- NULL
+coldata_150
+```
+
+
+```{r}
+common_samples_150 <- intersect(colnames(counts), rownames(coldata_150))
+counts_150 <- counts[, common_samples_150]
+head(counts_150)
+```
+```{r}
+summary(colSums(counts_150))
+```
+```{r}
+coldata_150$time <- relevel(factor(coldata_150$time), ref = "before")
+modelMatrix <- model.matrix(~ 0 + patient + time, coldata_150)
+modelMatrix
+```
+**Создаем DESeqDataSet из матрицы каунтов**
+```{r}
+dds_150 <- DESeqDataSetFromMatrix(countData = counts_150, 
+                              colData = coldata_150, 
+                              design = ~ 0 + patient + time)
+dds_150$time <- relevel(dds_150$time, ref = "before")
+dds_150
+```
+```{r}
+dim(dds_150)
+smallestGroupSize <- 3
+keep <- rowSums(counts(dds_150) >= 10) >= smallestGroupSize
+dds_150 <- dds_150[keep,]
+dim(dds_150)
+```
+
+
+**Run Differential Expression Analysis for 150 type**
+```{r}
+dds_150 <- DESeq(dds_150, fitType = "parametric")
+```
+
+```{r}
+res_150 <- results(dds_150, contrast=c("time", "after", "before"))
+res_150
+```
+**MA plot**
+```{r}
+plot_ma_from_res(res_df = res_150, alpha = 0.05)
+```
+
+	
+
+```{r}
+# tiff("./pictures/PlotMA_standart_padj_0.05_type150.tiff", 
+#      width = 8, height = 6, units = "in", res = 300, bg = "white")
+plotMA(res_150, alpha = 0.05) 
+```
+
+**Значимые результаты**
+```{r}
+summary(results(dds_150, contrast=c("time", "after", "before"), alpha=0.05) )
+```
+
+```{r}
+res_sign_150 <- as.data.frame(subset(res_150, padj < 0.05 & !is.na(padj) & abs(log2FoldChange) > 1))
+res_sign_150
+```
+Visualisation for the first gene
+```{r}
+create_gene_boxplot(dds_150, "hsa-miR-133a-3p/133b", output_file = NULL)
+```
+
+**Volcano plot**
+```{r}
+plt <- EnhancedVolcano(res_150,
+                lab = rownames(res_150),
+                x = "log2FoldChange",
+                y = "padj",
+                pCutoff = 0.05,
+                FCcutoff = 1,
+                labSize = 3.0,
+                boxedLabels = FALSE,
+                col = c('black', '#CBD5E8', '#B3E2CD', 'red'),
+                colAlpha = 1,
+                title = NULL,
+                selectLab = rownames(signres_150),  # 👈 все метки будут отображены
+                drawConnectors = TRUE               # стрелочки, если метки накладываются
+)
+
+plt
+ggsave("./pictures/Volcano plot_150type.tiff", plot = plt, width = 8, height = 6, dpi = 300, bg = "white")
+```
+**rlog трансформация**
+	•	Черные точки – стандартное отклонение отдельных генов.
+	•	Красная линия – сглаженный тренд зависимости SD от среднего значения экспрессии.
+	•	Если красная линия наклонена вверх → стандартное отклонение растёт с увеличением среднего (плохая нормализация).
+	•	Если красная линия примерно горизонтальна → нормализация сработала хорошо.
+```{r}
+rlt_150 <- rlog(dds_150) 
+meanSdPlot(assay(rlt_150))  #показывает, как изменяется стандартное отклонение в зависимости от среднего значения экспрессии.
+```
+**PCA plot**
+PCA – это метод снижения размерности, который показывает различия между образцами. Строится на основе различий в экспрессии по всем генам, даже если они не являются значимо дифференциально экспрессированными.
+	•	Оно не накладывает статистических порогов вроде padj < 0.05 или |log2FoldChange| > 1, а просто ищет наибольшие источники вариабельности среди всех измерений.
+	•	Поэтому даже небольшие изменения экспрессии могут формировать кластеры и различать группы в PCA, если эти изменения систематичны между образцами.
+```{r}
+pcaData <- plotPCA(rlt_150, intgroup=c("time", "patient"), returnData = TRUE)
+percentVar <- round(100 * attr(pcaData, "percentVar"))
+
+ggplot(pcaData, aes(PC1, PC2, shape = patient, color = time)) +
+  geom_point(size = 3) +
+  xlab(paste0("PC1: ", percentVar[1], "%")) +
+  ylab(paste0("PC2: ", percentVar[2], "%")) + 
+  coord_fixed() +
+  theme_bw() +
+  scale_color_brewer(palette = "Set2")
+```
+```{r}
+assay(rlt_150) <- limma::removeBatchEffect(assay(rlt_150),
+                                       batch = colData(dds_150)[,'patient'])
+
+pcaData <- plotPCA(rlt_150, intgroup=c("time", "patient"), returnData = TRUE)
+percentVar <- round(100 * attr(pcaData, "percentVar"))
+
+plt <- ggplot(pcaData, aes(PC1, PC2, shape = patient, color = time)) +
+  geom_point(size = 3) +
+  xlab(paste0("PC1: ", percentVar[1], "%")) +
+  ylab(paste0("PC2: ", percentVar[2], "%")) + 
+  coord_fixed() +
+  theme_bw() +
+  scale_color_brewer(palette = "Set2")
+plt
+ggsave("./pictures/PCA plot for type 150 after removing donor effect.tiff", plot = plt, width = 8, height = 6, dpi = 300, bg = "white")
+```
+**Plot a heatmap of diff expressed genes**
+
+```{r}
+res_sign_150 <- res_sign_150[order(res_sign_150$log2FoldChange, decreasing = TRUE), ]
+
+sig_genes <- rownames(res_sign_150)  # Получаем имена генов, которые прошли фильтрацию
+
+de_mat <- assay(rlt_150)[sig_genes, ] 
+datamatrix <- de_mat
+
+annotation_col <- data.frame(condition = coldata_150$condition)
+rownames(annotation_col) <- colnames(datamatrix)
+
+
+plt <- pheatmap(datamatrix, 
+         cluster_rows = TRUE, 
+         show_rownames = TRUE, 
+         cluster_cols = TRUE, 
+         annotation_col = annotation_col,
+         display_numbers = FALSE,
+         legend = TRUE,
+         fontsize = 15)  
+plt
+ggsave("./pictures/Heatmap of diff expressed genes_type150.tiff", plot = plt, width = 8, height = 6, dpi = 300, bg = "white")
+```
+**Plot of the distance between samples heatmap**
+Расчет расстояний между образцами
+	•	Обычно используется евклидово расстояние (по умолчанию в DESeq2).
+	•	Оно вычисляется по нормализованным данным экспрессии (rlog() или vst()).
+	•	Чем меньше расстояние — тем более похожи образцы.
+
+```{r}
+sampleDists_150 <- dist(t(assay(rlt_150)))
+sampleDistMatrix_150 <- as.matrix(sampleDists_150)
+rownames(sampleDistMatrix_150) <- paste(rlt_150$condition, rlt_150$patient, sep="_patient")
+colnames(sampleDistMatrix_150) <- paste(rlt_150$condition, rlt_150$patient, sep="_patient")
+colors <- colorRampPalette(rev(brewer.pal(9, "Blues")) )(255)
+
+plt <- pheatmap(sampleDistMatrix_150,
+         clustering_distance_rows = "euclidean",
+         clustering_distance_cols = "euclidean",
+         fontsize = 12,
+         legend = FALSE,
+         display_numbers = FALSE,
+         color = colors)
+plt
+ggsave("./pictures/Plot of the distance between samples_type150.tiff", plot = plt, width = 8, height = 6, dpi = 300, bg = "white")
+```
+
+### Анализ обогащения для везикул типа 150 ###
+```{r}
+source(here("src", "enrichment.R"))
+targets_list_150 <- list()
+targets_list_150 <- convert_miRNA_versions(
+    res_sign_df = res_sign_150,
+    table = "validated"
+  )
+```
+```{r}
+kegg_plots <- list()
+
+for (direction in c("up", "down")) {
+  gene_list <- targets_list[[direction]]
+    
+    if (length(gene_list) == 0) {
+      message(sprintf("No genes for %s %s. Skipping...", direction))
+      kegg_plots[[direction]] <- NULL
+      next
+    }
+    
+    kegg_plots[[direction]] <- perform_kegg_enrichment(
+      gene_list,
+      direction = direction
+    )
+}
+
+kegg_plots$up
+kegg_plots$down
+```
+```{r}
+source(here("src", "enrichment.R"))
+go_plots_150 <- list()
+
+for (direction in c("up", "down")) {
+  gene_list <- targets_list_150[[direction]]
+  
+  if (length(gene_list) == 0) {
+    message(sprintf("No genes for %s. Skipping...", direction))
+    go_plots_150[[direction]] <- NULL
+    next
+  }
+  
+  go_plots_150[[direction]] <- perform_go_enrichment(
+    gene_list,
+    direction = direction
+  )
+}
+
+go_plots_150$up
+go_plots_150$down
+```
+
+### Только везикулы типа 16 ###
+```{r}
+coldata_16 <- phenotable[phenotable$type == 16, ]
+rownames(coldata_16) <- coldata_16$sample
+coldata_16
+```
+```{r}
+common_samples_16 <- intersect(colnames(counts), coldata_16$sample)
+
+counts_16 <- counts[, common_samples_16]  
+head(counts_16)
+```
+**Создаем DESeqDataSet из матрицы каунтов**
+```{r}
+dds_16 <- DESeqDataSetFromMatrix(countData = counts_16, 
+                              colData = coldata_16, 
+                              design = ~ 0 + patient + time)
+dds_16$time <- relevel(dds_16$time, ref = "before")
+dds_16
+```
+**Фильтрация**
+```{r}
+dim(dds_16)
+smallestGroupSize <- 3
+keep <- rowSums(counts(dds_16) >= 10) >= smallestGroupSize
+dds_16 <- dds_16[keep,]
+dim(dds_16)
+```
+
+**Run Differential Expression Analysis for 150 type**
+```{r}
+dds_16 <- DESeq(dds_16, fitType = "parametric")
+```
+
+```{r}
+reads_after <- colSums(counts(dds))
+total_after <- sum(counts(dds))
+reads_after
+reads_after <- data.frame(reads_after)
+```
+
+```{r}
+res_16 <- results(dds_16, contrast=c("time", "after", "before"))
+res_16
+```
+**MA plot**
+
+Фильтрация точек с низким средним экспрессированием (по baseMean).
+	•	Обычно отсекаются baseMean < 1.
+	2.	Определение значимых генов (синие точки):
+	•	Используется критерий padj < 0.1 по умолчанию, а не < 0.05! 
+```{r}
+plotMA(res_16, alpha = 0.05, ylim = c(-8, 8)) 
+```
+**Кастомный MA plot по p-value**
+```{r}
+plot_ma_from_res(res_df = res_16, alpha = 0.05)
+```
+**Значимые результаты**
+```{r}
+summary(results(dds_16, contrast=c("time", "after", "before"), alpha=0.05) )
+```
+```{r}
+res_sign_16 <- as.data.frame(subset(res_16, padj < 0.05 & !is.na(padj) & abs(log2FoldChange) > 1))
+res_sign_16
+```
+
+```{r}
+create_gene_boxplot(dds_150, "hsa-miR-126-3p", output_file = NULL)
+```
+
+
+**Volcano plot**
+```{r}
+plt <- EnhancedVolcano(res_16,
+                lab = rownames(res_16),
+                x = "log2FoldChange",
+                y = "padj",
+                pCutoff = 0.05,
+                FCcutoff = 1,
+                labSize = 3.0,
+                boxedLabels = FALSE,
+                col = c('black', '#CBD5E8', '#B3E2CD','red'),
+                colAlpha = 1,
+                title = NULL,        
+                subtitle = NULL,
+                selectLab = rownames(res_sign_16),  # 👈 все метки будут отображены
+                drawConnectors = TRUE               # стрелочки, если метки накладываются
+) 
+
+plt
+ggsave("./pictures/Volcano plot_based_on_Pvalue_16type.tiff", plot = plt, width = 8, height = 6, dpi = 300, bg = "white")
+```
+**rlog трансформация**
+```{r}
+rlt_16 <- rlog(dds_16) 
+```
+
+```{r}
+pcaData <- plotPCA(rlt_16, intgroup=c("time", "patient"), returnData = TRUE)
+percentVar <- round(100 * attr(pcaData, "percentVar"))
+
+ggplot(pcaData, aes(PC1, PC2, shape = patient, color = time)) +
+  geom_point(size = 3) +
+  xlab(paste0("PC1: ", percentVar[1], "%")) +
+  ylab(paste0("PC2: ", percentVar[2], "%")) + 
+  coord_fixed() +
+  theme_bw() +
+  scale_color_brewer(palette = "Set2")
+```
+
+
+```{r}
+assay(rlt_16) <- limma::removeBatchEffect(assay(rlt_16),
+                                       batch = colData(dds_16)[,'patient'])
+
+pcaData <- plotPCA(rlt_16, intgroup=c("time", "patient"), returnData = TRUE)
+percentVar <- round(100 * attr(pcaData, "percentVar"))
+
+plt <- ggplot(pcaData, aes(PC1, PC2, shape = patient, color = time)) +
+  geom_point(size = 3) +
+  xlab(paste0("PC1: ", percentVar[1], "%")) +
+  ylab(paste0("PC2: ", percentVar[2], "%")) + 
+  coord_fixed() +
+  theme_bw() +
+  scale_color_brewer(palette = "Set2")
+
+plt
+ggsave("./pictures/PCA plot for type 16 after removing donor effect.tiff", plot = plt, width = 8, height = 6, dpi = 300, bg = "white")
+```
+### Анализ обогащения для везикул типа 16 ###
+```{r}
+targets_list_16 <- list()
+targets_list_16 <- convert_miRNA_versions(
+    res_sign_df = res_sign_16,
+    table = "validated"
+  )
+targets_list_16
+```
+```{r}
+kegg_plots_16 <- list()
+
+for (direction in c("up")) {
+  gene_list <- targets_list_16[[direction]]
+    
+    kegg_plots[[direction]] <- perform_kegg_enrichment(
+      gene_list,
+      direction = direction
+    )
+}
+
+kegg_plots$up
+```
+```{r}
+go_plots_16 <- list()
+
+for (direction in c("up")) {
+  gene_list <- targets_list_16[[direction]]
+    
+    go_plots_16[[direction]] <- perform_go_enrichment(
+      gene_list,
+      direction = direction
+    )
+}
+
+go_plots_16$up
+
+```
+
+**miR-126-3p в этих везикулах может быть маркёром усиленной эндотелиальной регенерации после АКШ**
+	•	Регулирует ангиогенез и репарацию сосудов
+	•	Влияет на пролиферацию эндотелиальных клеток
+	•	Участвует в сигнальных каскадах роста и деления клеток
+Все пути связаны с клеточным циклом, митозом и регенерацией, что важно после АКШ.
+ miR-126-3p регулирует митоз и ангиогенез, подавляя ингибиторы роста (например, FOXO3, PIK3R2).
+Везикулы, открученные при 16 000 об/мин, могут быть более богаты на пролиферативные сигналы 
+
+
+
+
+
+

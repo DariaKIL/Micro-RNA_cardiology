@@ -4,14 +4,11 @@ output:
   html_notebook: default
 ---
 
-```{r}
-rmarkdown::render("Transplantation_analysis.Rmd", output_file = "reports/Transplantation_analysis.html", clean=TRUE)
-```
 ### Data importing ###
 
 ```{r}
-source(here("config.R"))
-source(here("Transplantation", "config_t.R"))
+source(here("config_c.R"))
+source(here("Cys", "config_t.R"))
 source(here("src", "data_processing.R"))
 source(here("src", "visualization.R"))
 source(here("src", "calculations.R"))
@@ -152,7 +149,6 @@ heatmap_plots$CAV
 ### Enrichment analysis ###
 **Searching for targets**
 ```{r}
-source(here("src", "enrichment.R"))
 targets_list <- list()
 for(name in names(all_sign_res)) {
   targets_list[[name]] <- convert_miRNA_versions(
@@ -165,19 +161,15 @@ for(name in names(all_sign_res)) {
 **Perform KEGG enrichment analysis**
 ```{r}
 kegg_plots <- list()
-
 for (contrast in names(targets_list)) {
   kegg_plots[[contrast]] <- list()
-  
   for (direction in c("up", "down")) {
     gene_list <- targets_list[[contrast]][[direction]]
-    
     if (length(gene_list) == 0) {
       message(sprintf("No genes for %s %s. Skipping...", contrast, direction))
       kegg_plots[[contrast]][[direction]] <- NULL
       next
     }
-    
     kegg_plots[[contrast]][[direction]] <- perform_kegg_enrichment(
       gene_list,
       contrast_name = contrast,
@@ -190,3 +182,17 @@ kegg_plots$humoral$up
 kegg_plots$humoral$down
 kegg_plots$CAV$up
 ```
+```{r}
+source(here("src", "enrichment.R"))
+targets_table <- list()
+for(name in names(all_sign_res)) {
+  targets_list[[name]] <- targets_miR_table(
+    res_sign_df = all_sign_res[[name]],
+    contrast_name = name,
+    table = "validated"
+  )
+}
+targets_table
+```
+
+

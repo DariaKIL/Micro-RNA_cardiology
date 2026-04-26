@@ -1,5 +1,33 @@
 # config.R
 
+required_packages <- c(
+  "DESeq2", "ggplot2", "pheatmap", "RColorBrewer", 
+  "vsn", "hexbin", "tidyverse", "ggrepel", 
+  "EnhancedVolcano", "ggvenn", "clusterProfiler",
+  "org.Hs.eg.db", "multiMiR", "miRBaseConverter", "here", 
+  "dplyr", "tidyr", "biomaRt", "GenomicRanges", "msigdbr",
+  "enrichplot", "Rtsne", "GGally", "rvest", "patchwork"
+)
+
+# Function to install missing packages
+install_if_missing <- function(packages) {
+  for (pkg in packages) {
+    if (!requireNamespace(pkg, quietly = TRUE)) {
+      if (pkg %in% c("DESeq2", "clusterProfiler", "org.Hs.eg.db", 
+                     "EnhancedVolcano", "vsn", "hexbin")) {
+        BiocManager::install(pkg)
+      } else {
+        install.packages(pkg)
+      }
+    }
+  }
+}
+
+# Load all libraries
+suppressPackageStartupMessages({
+  lapply(required_packages, library, character.only = TRUE)
+})
+
 
 COUNTS_MIR_FILE <- here("data", "raw", "miR.Counts.csv")
 COUNTS_TRF_FILE <- here("data", "raw", "tRF.Counts.csv")
@@ -31,33 +59,5 @@ MAX_GENESET_SIZE <- 500
 set.seed(42)
 
 # REQUIRED LIBRARIES
-
-required_packages <- c(
-  "DESeq2", "ggplot2", "pheatmap", "RColorBrewer", 
-  "vsn", "hexbin", "tidyverse", "ggrepel", 
-  "EnhancedVolcano", "ggvenn", "clusterProfiler",
-  "org.Hs.eg.db", "multiMiR", "miRBaseConverter", "here", 
-  "dplyr", "tidyr", "biomaRt", "GenomicRanges", "msigdbr",
-  "enrichplot", "Rtsne", "GGally", "rvest", "patchwork"
-)
-
-# Function to install missing packages
-install_if_missing <- function(packages) {
-  for (pkg in packages) {
-    if (!requireNamespace(pkg, quietly = TRUE)) {
-      if (pkg %in% c("DESeq2", "clusterProfiler", "org.Hs.eg.db", 
-                     "EnhancedVolcano", "vsn", "hexbin")) {
-        BiocManager::install(pkg)
-      } else {
-        install.packages(pkg)
-      }
-    }
-  }
-}
-
-# Load all libraries
-suppressPackageStartupMessages({
-  lapply(required_packages, library, character.only = TRUE)
-})
 
 cat("✓ Configuration loaded successfully\n")
